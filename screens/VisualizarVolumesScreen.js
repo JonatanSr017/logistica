@@ -155,7 +155,7 @@ const DetalheOrdemScreen = ({ route }) => {
                 if (item.saldo_separar > 0) {
                   navigation.navigate('SepararVolume', { item, ordem });
                 } else {
-                  Alert.alert('Atenção', 'Este item já foi completamente separado.');
+                  Alert.alert('Atenção', 'Esse item já foi completamente separado.');
                 }
               }}
             >
@@ -164,66 +164,6 @@ const DetalheOrdemScreen = ({ route }) => {
           </View>
         )}
       </View>
-    );
-  };
-
-  const handleContinuarSeparacao = () => {
-    navigation.navigate('EmbarqueScreen', { ordem });
-  };
-
-  const handleCarregarTudo = async () => {
-    const todosDefinidos = itens.every((item) => item.qtde_definida > 0);
-
-    const pergunta = todosDefinidos
-      ? 'Deseja cancelar a carga completa e redefinir todas as quantidades?'
-      : 'Tem certeza que deseja definir todas as quantidades como iguais ao saldo a carregar?';
-
-    const continuar = await new Promise((resolve) => {
-      Alert.alert('Carregar tudo', pergunta, [
-        { text: 'Cancelar', onPress: () => resolve(false), style: 'cancel' },
-        { text: 'Confirmar', onPress: () => resolve(true) },
-      ]);
-    });
-
-    if (!continuar) return;
-
-    const updates = itens.map((item) => {
-      const cargaTotal = item.qtde_definida + item.carga;
-      if (todosDefinidos) {
-        return {
-          id: item.id,
-          qtde_definida: 0,
-          carga: cargaTotal,
-          saldo_separar: 0,
-          selecionado: false,
-        };
-      } else {
-        return {
-          id: item.id,
-          qtde_definida: cargaTotal,
-          carga: 0,
-          saldo_separar: cargaTotal,
-          selecionado: true,
-        };
-      }
-    });
-
-    for (const update of updates) {
-      await supabase
-        .from('itens_ordem')
-        .update({
-          qtde_definida: update.qtde_definida,
-          carga: update.carga,
-          saldo_separar: update.saldo_separar,
-          selecionado: update.selecionado,
-        })
-        .eq('id', update.id);
-    }
-
-    buscarItens();
-    Alert.alert(
-      'Pronto',
-      todosDefinidos ? 'Carga total cancelada.' : 'Todos os itens foram definidos com o saldo disponível.'
     );
   };
 
@@ -249,12 +189,68 @@ const DetalheOrdemScreen = ({ route }) => {
 
         {!loading && (
           <View style={styles.rodape}>
-            <TouchableOpacity style={styles.botaoCaminhao} onPress={handleCarregarTudo}>
+            <TouchableOpacity
+              style={styles.botaoCaminhao}
+              onPress={async () => {
+                const todosDefinidos = itens.every((item) => item.qtde_definida > 0);
+
+                const pergunta = todosDefinidos
+                  ? 'Deseja cancelar a carga completa e redefinir todas as quantidades?'
+                  : 'Tem certeza que deseja definir todas as quantidades como iguais ao saldo a carregar?';
+
+                const continuar = await new Promise((resolve) => {
+                  Alert.alert('Carregar tudo', pergunta, [
+                    { text: 'Cancelar', onPress: () => resolve(false), style: 'cancel' },
+                    { text: 'Confirmar', onPress: () => resolve(true) },
+                  ]);
+                });
+
+                if (!continuar) return;
+
+                const updates = itens.map((item) => {
+                  const cargaTotal = item.qtde_definida + item.carga;
+                  if (todosDefinidos) {
+                    return {
+                      id: item.id,
+                      qtde_definida: 0,
+                      carga: cargaTotal,
+                      saldo_separar: 0,
+                      selecionado: false,
+                    };
+                  } else {
+                    return {
+                      id: item.id,
+                      qtde_definida: cargaTotal,
+                      carga: 0,
+                      saldo_separar: cargaTotal,
+                      selecionado: cargaTotal > 0,
+                    };
+                  }
+                });
+
+                for (const update of updates) {
+                  await supabase
+                    .from('itens_ordem')
+                    .update({
+                      qtde_definida: update.qtde_definida,
+                      carga: update.carga,
+                      saldo_separar: update.saldo_separar,
+                      selecionado: update.selecionado,
+                    })
+                    .eq('id', update.id);
+                }
+
+                buscarItens();
+              }}
+            >
               <Text style={styles.iconeCaminhao}>🚚</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.botaoSeparacao} onPress={handleContinuarSeparacao}>
-              <Text style={styles.textoBotao}>Continuar Separação</Text>
+            <TouchableOpacity
+              style={styles.botaoSeparacao}
+              onPress={() => navigation.navigate('VisualizarVolumes', { ordem })}
+            >
+              <Text style={styles.textoBotao}>Ver Volumes</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -325,12 +321,13 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   rodape: {
-    marginTop: 12,
-    borderTopWidth: 1,
-    borderColor: '#ccc',
-    paddingTop: 10,
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderColor: '#ccc',
   },
   botaoCaminhao: {
     backgroundColor: '#3498db',
@@ -343,11 +340,10 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   botaoSeparacao: {
-    backgroundColor: '#27ae60',
+    backgroundColor: '#8e44ad',
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 10,
-    alignItems: 'center',
   },
 });
 
