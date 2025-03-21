@@ -20,42 +20,66 @@ const EmbarqueScreen = ({ route }) => {
   const [volumes, setVolumes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [todosConferidosEEmbarcados, setTodosConferidosEEmbarcados] = useState(false);
+  const [itensOrdem, setItensOrdem] = useState([]);
 
   useEffect(() => {
-    buscarVolumes();
+    buscarDados();
   }, []);
 
-  const buscarVolumes = async () => {
+  const buscarDados = async () => {
     setLoading(true);
-    const { data, error } = await supabase
+
+    const { data: volumesData, error: volumesError } = await supabase
       .from('itens_volume')
       .select('*')
       .eq('chave_contrato_carga_obra', ordem.chave_contrato_carga_obra);
 
-    if (error) {
-      Alert.alert('Erro ao buscar volumes', error.message);
+    const { data: itensData, error: itensError } = await supabase
+      .from('itens_ordem')
+      .select('*')
+      .eq('chave_contrato_carga_obra', ordem.chave_contrato_carga_obra);
+
+    if (volumesError || itensError) {
+      Alert.alert('Erro ao buscar dados', volumesError?.message || itensError?.message);
     } else {
-      setVolumes(data);
-      verificarTodosVolumes(data);
+      setVolumes(volumesData);
+      setItensOrdem(itensData);
+      verificarTodosVolumes(volumesData, itensData);
     }
     setLoading(false);
   };
 
-  const verificarTodosVolumes = (lista) => {
-    const todosOk = lista.length > 0 && lista.every(v => v.confirma_embarque && v.embarcado);
-    setTodosConferidosEEmbarcados(todosOk);
+  const verificarTodosVolumes = (volumes, itens) => {
+    if (volumes.length === 0 || itens.length === 0) {
+      setTodosConferidosEEmbarcados(false);
+      return;
+    }
+
+    const todosItensSeparados = itens.every((item) => {
+      const volumesDoItem = volumes.filter((v) => v.id_itens === item.id);
+      const totalSeparado = volumesDoItem.reduce((sum, v) => sum + v.quantidade, 0);
+      return item.qtde_definida > 0 && totalSeparado === item.qtde_definida;
+    });
+
+    const todosVolumesOk = volumes.every((v) => v.confirma_embarque && v.embarcado);
+
+    setTodosConferidosEEmbarcados(todosItensSeparados && todosVolumesOk);
   };
 
   const handleConfirmar = async (volume) => {
-    if (volume.confirma_embarque) {
-      Alert.alert('Volume já foi conferido.');
+    const itemRelacionado = itensOrdem.find((i) => i.id === volume.id_itens);
+    const volumesDoItem = volumes.filter((v) => v.id_itens === volume.id_itens);
+    const totalSeparado = volumesDoItem.reduce((sum, v) => sum + v.quantidade, 0);
+
+    if (itemRelacionado?.qtde_definida > 0 && totalSeparado < itemRelacionado.qtde_definida) {
+      Alert.alert('Erro', `Item ${itemRelacionado.codigo} ainda não está totalmente separado.`);
       return;
     }
 
     const confirmar = await new Promise((resolve) => {
       Alert.alert(
-        'Conferir Volume',
-        `Deseja confirmar o volume ${volume.nVolume} da peça ${volume.codigo}?`,
+        'Confirmar Volume',
+        `Deseja realmente confirmar o volume ${volume.nVolume} do item ${volume.codigo}?`,
         [
           { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
           { text: 'Confirmar', onPress: () => resolve(true) },
@@ -70,7 +94,7 @@ const EmbarqueScreen = ({ route }) => {
       .update({ confirma_embarque: true })
       .eq('id', volume.id);
 
-    if (!error) buscarVolumes();
+    if (!error) buscarDados();
   };
 
   const handleEmbarcar = async (volume) => {
@@ -79,15 +103,10 @@ const EmbarqueScreen = ({ route }) => {
       return;
     }
 
-    if (volume.embarcado) {
-      Alert.alert('Volume já embarcado.');
-      return;
-    }
-
     const confirmar = await new Promise((resolve) => {
       Alert.alert(
         'Embarcar Volume',
-        `Tem certeza que deseja marcar o volume ${volume.nVolume} da peça ${volume.codigo} como embarcado?`,
+        `Tem certeza que deseja marcar o volume ${volume.nVolume} do item ${volume.codigo} como embarcado?`,
         [
           { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
           { text: 'Sim', onPress: () => resolve(true) },
@@ -102,7 +121,7 @@ const EmbarqueScreen = ({ route }) => {
       .update({ embarcado: true })
       .eq('id', volume.id);
 
-    if (!error) buscarVolumes();
+    if (!error) buscarDados();
   };
 
   return (

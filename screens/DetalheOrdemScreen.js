@@ -12,6 +12,7 @@ import {
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
+  Keyboard,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { supabase } from '../lib/supabaseClient';
@@ -19,10 +20,15 @@ import { supabase } from '../lib/supabaseClient';
 const DetalheOrdemScreen = ({ route }) => {
   const navigation = useNavigation();
   const { ordem } = route.params;
+
   const [itens, setItens] = useState([]);
   const [quantidades, setQuantidades] = useState({});
   const [modoEdicao, setModoEdicao] = useState({});
   const [loading, setLoading] = useState(true);
+  const [cargaTotalAplicada, setCargaTotalAplicada] = useState(false);
+  const [podeEmbarcar, setPodeEmbarcar] = useState(false);
+  const [porcentagemSeparacao, setPorcentagemSeparacao] = useState(0);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
 
   const buscarItens = async () => {
     setLoading(true);
@@ -43,6 +49,57 @@ const DetalheOrdemScreen = ({ route }) => {
     buscarItens();
   }, []);
 
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      buscarItens();
+    });
+    return unsubscribe;
+  }, [navigation]);
+
+  useEffect(() => {
+    const verificarProgresso = () => {
+      const itensComQtde = itens.filter((item) => item.qtde_definida > 0);
+      const total = itensComQtde.length;
+      const concluidos = itensComQtde.filter(
+        (item) => item.qtde_separada === item.qtde_definida
+      ).length;
+
+      const todosSeparados = total > 0 && concluidos === total;
+      setPodeEmbarcar(todosSeparados);
+
+      const porcentagem = total > 0 ? Math.round((concluidos / total) * 100) : 0;
+      setPorcentagemSeparacao(porcentagem);
+    };
+
+    verificarProgresso();
+  }, [itens]);
+
+  useEffect(() => {
+    const showSubscription = Keyboard.addListener('keyboardDidShow', () => {
+      setKeyboardVisible(true);
+    });
+    const hideSubscription = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardVisible(false);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+
+  const atualizarQuantidadeItem = async (itemId, novaQtde) => {
+    const { error } = await supabase
+      .from('itens_ordem')
+      .update({
+        qtde_definida: novaQtde,
+        saldo_separar: novaQtde,
+        selecionado: novaQtde > 0,
+      })
+      .eq('id', itemId);
+    return error;
+  };
+
   const confirmarQuantidade = async (item) => {
     let entrada = quantidades[item.id];
     if (entrada === '' || entrada === null || entrada === undefined) {
@@ -51,42 +108,34 @@ const DetalheOrdemScreen = ({ route }) => {
 
     const novaQtde = parseInt(entrada);
     const antigaQtde = item.qtde_definida || 0;
-    const saldoAtual = item.carga;
 
     if (isNaN(novaQtde) || novaQtde < 0) {
       Alert.alert('Atenção', 'Informe uma quantidade válida (0 ou mais).');
       return;
     }
 
-    const novaCarga = saldoAtual + antigaQtde - novaQtde;
-
-    if (novaQtde > saldoAtual + antigaQtde) {
+    const saldoDisponivel = item.carga + antigaQtde;
+    if (novaQtde > saldoDisponivel) {
       Alert.alert('Erro', 'Quantidade não pode ser maior que o saldo disponível.');
       return;
     }
 
-    const continuar = await new Promise((resolve) => {
-      Alert.alert(
-        'Confirmar Alteração',
-        `Deseja alterar a quantidade de ${antigaQtde} para ${novaQtde}?`,
-        [
-          { text: 'Cancelar', onPress: () => resolve(false), style: 'cancel' },
-          { text: 'Confirmar', onPress: () => resolve(true) },
-        ]
-      );
-    });
+    if (antigaQtde > 0 && novaQtde !== antigaQtde) {
+      const continuar = await new Promise((resolve) => {
+        Alert.alert(
+          'Confirmar Alteração',
+          `Deseja alterar a quantidade de ${antigaQtde} para ${novaQtde}?`,
+          [
+            { text: 'Cancelar', onPress: () => resolve(false), style: 'cancel' },
+            { text: 'Confirmar', onPress: () => resolve(true) },
+          ]
+        );
+      });
 
-    if (!continuar) return;
+      if (!continuar) return;
+    }
 
-    const { error } = await supabase
-      .from('itens_ordem')
-      .update({
-        qtde_definida: novaQtde,
-        carga: novaCarga,
-        saldo_separar: novaQtde,
-        selecionado: novaQtde > 0,
-      })
-      .eq('id', item.id);
+    const error = await atualizarQuantidadeItem(item.id, novaQtde);
 
     if (error) {
       Alert.alert('Erro ao salvar', error.message);
@@ -97,7 +146,6 @@ const DetalheOrdemScreen = ({ route }) => {
             ? {
                 ...i,
                 qtde_definida: novaQtde,
-                carga: novaCarga,
                 saldo_separar: novaQtde,
                 selecionado: novaQtde > 0,
               }
@@ -111,12 +159,32 @@ const DetalheOrdemScreen = ({ route }) => {
 
   const renderItem = ({ item }) => {
     const emEdicao = modoEdicao[item.id];
+    const entradaAtual = quantidades[item.id] !== undefined
+      ? parseInt(quantidades[item.id]) || 0
+      : item.qtde_definida || 0;
+
+    const saldoACarregar = item.carga - entradaAtual;
+
+    let statusCor = '#ccc';
+    let statusTexto = '🔴 Não definido';
+
+    if (item.qtde_definida > 0 && item.qtde_separada === item.qtde_definida) {
+      statusCor = '#2ecc71';
+      statusTexto = '🟢 Separado';
+    } else if (item.qtde_separada > 0 && item.qtde_separada < item.qtde_definida) {
+      statusCor = '#f1c40f';
+      statusTexto = '🟡 Parcial';
+    }
 
     return (
       <View key={item.id} style={styles.card}>
-        <Text style={styles.codigo}>Código: {item.codigo} {item.qtde_definida > 0 && !emEdicao ? '✅' : ''}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+          <Text style={styles.codigo}>Código: {item.codigo}</Text>
+          <Text style={[styles.statusTag, { backgroundColor: statusCor }]}>{statusTexto}</Text>
+        </View>
+
         <Text>Descrição: {item.descricao}</Text>
-        <Text>Saldo a Carregar: {item.carga}</Text>
+        <Text>Saldo a Carregar: {saldoACarregar}</Text>
         <Text>Quantidade Definida: {item.qtde_definida || 0}</Text>
 
         {emEdicao ? (
@@ -146,84 +214,35 @@ const DetalheOrdemScreen = ({ route }) => {
                 });
               }}
             >
-              <Text style={styles.textoEditar}>Editar</Text>
+              <Text style={styles.textoEditar}>
+                {item.qtde_definida > 0 ? 'Editar qtde' : 'Definir qtde'}
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.botaoEditar, { backgroundColor: item.saldo_separar > 0 ? '#2980b9' : '#ccc' }]}
+              style={[
+                styles.botaoEditar,
+                {
+                  backgroundColor:
+                    item.qtde_definida > 0 && item.saldo_separar > 0 ? '#2980b9' : '#ccc',
+                },
+              ]}
               onPress={() => {
-                if (item.saldo_separar > 0) {
-                  navigation.navigate('SepararVolume', { item, ordem });
+                if (item.qtde_definida === 0) {
+                  Alert.alert('Atenção', 'Defina uma quantidade antes de separar o volume.');
+                } else if (item.saldo_separar <= 0) {
+                  Alert.alert('Atenção', 'Todos os volumes deste item já foram separados.');
                 } else {
-                  Alert.alert('Atenção', 'Este item já foi completamente separado.');
+                  navigation.navigate('SepararVolume', { item, ordem });
                 }
               }}
+              disabled={item.qtde_definida === 0 || item.saldo_separar <= 0}
             >
               <Text style={styles.textoEditar}>Separar Volume</Text>
             </TouchableOpacity>
           </View>
         )}
       </View>
-    );
-  };
-
-  const handleContinuarSeparacao = () => {
-    navigation.navigate('EmbarqueScreen', { ordem });
-  };
-
-  const handleCarregarTudo = async () => {
-    const todosDefinidos = itens.every((item) => item.qtde_definida > 0);
-
-    const pergunta = todosDefinidos
-      ? 'Deseja cancelar a carga completa e redefinir todas as quantidades?'
-      : 'Tem certeza que deseja definir todas as quantidades como iguais ao saldo a carregar?';
-
-    const continuar = await new Promise((resolve) => {
-      Alert.alert('Carregar tudo', pergunta, [
-        { text: 'Cancelar', onPress: () => resolve(false), style: 'cancel' },
-        { text: 'Confirmar', onPress: () => resolve(true) },
-      ]);
-    });
-
-    if (!continuar) return;
-
-    const updates = itens.map((item) => {
-      const cargaTotal = item.qtde_definida + item.carga;
-      if (todosDefinidos) {
-        return {
-          id: item.id,
-          qtde_definida: 0,
-          carga: cargaTotal,
-          saldo_separar: 0,
-          selecionado: false,
-        };
-      } else {
-        return {
-          id: item.id,
-          qtde_definida: cargaTotal,
-          carga: 0,
-          saldo_separar: cargaTotal,
-          selecionado: true,
-        };
-      }
-    });
-
-    for (const update of updates) {
-      await supabase
-        .from('itens_ordem')
-        .update({
-          qtde_definida: update.qtde_definida,
-          carga: update.carga,
-          saldo_separar: update.saldo_separar,
-          selecionado: update.selecionado,
-        })
-        .eq('id', update.id);
-    }
-
-    buscarItens();
-    Alert.alert(
-      'Pronto',
-      todosDefinidos ? 'Carga total cancelada.' : 'Todos os itens foram definidos com o saldo disponível.'
     );
   };
 
@@ -237,6 +256,13 @@ const DetalheOrdemScreen = ({ route }) => {
         <Text style={styles.titulo}>Itens da Ordem {ordem.contrato}</Text>
         <Text numberOfLines={1} style={styles.cliente}>{ordem.cliente}</Text>
 
+        <View style={styles.progressoContainer}>
+          <View style={[styles.barraProgresso, { width: `${porcentagemSeparacao}%` }]} />
+        </View>
+        <Text style={styles.textoProgresso}>
+          Progresso de separação: {porcentagemSeparacao}%
+        </Text>
+
         <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
           <View style={{ flex: 1 }}>
             {loading ? (
@@ -247,16 +273,23 @@ const DetalheOrdemScreen = ({ route }) => {
           </View>
         </ScrollView>
 
-        {!loading && (
-          <View style={styles.rodape}>
-            <TouchableOpacity style={styles.botaoCaminhao} onPress={handleCarregarTudo}>
-              <Text style={styles.iconeCaminhao}>🚚</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.botaoSeparacao} onPress={handleContinuarSeparacao}>
-              <Text style={styles.textoBotao}>Continuar Separação</Text>
-            </TouchableOpacity>
-          </View>
+        {!keyboardVisible && (
+          <TouchableOpacity
+            style={[styles.botaoEtapa, !podeEmbarcar && styles.botaoEtapaDesativado]}
+            onPress={() => {
+              if (!podeEmbarcar) {
+                Alert.alert(
+                  'Atenção',
+                  'Ainda existem itens com quantidade definida que não foram totalmente separados.'
+                );
+                return;
+              }
+              navigation.navigate('FinalizarEmbarque', { ordem });
+            }}
+            disabled={!podeEmbarcar}
+          >
+            <Text style={[styles.textoBotao, !podeEmbarcar && { color: '#ecf0f1' }]}>Embarcar</Text>
+          </TouchableOpacity>
         )}
       </View>
     </KeyboardAvoidingView>
@@ -264,30 +297,33 @@ const DetalheOrdemScreen = ({ route }) => {
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 16,
-    backgroundColor: '#fff',
+  container: { flex: 1, padding: 16, backgroundColor: '#fff' },
+  titulo: { fontSize: 16, fontWeight: 'bold', marginBottom: 4 },
+  cliente: { fontSize: 14, color: '#333', marginBottom: 12 },
+  progressoContainer: {
+    height: 10,
+    backgroundColor: '#ecf0f1',
+    borderRadius: 6,
+    overflow: 'hidden',
+    marginBottom: 8,
   },
-  titulo: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  cliente: {
-    fontSize: 14,
-    color: '#333',
-    marginBottom: 12,
-  },
+  barraProgresso: { height: '100%', backgroundColor: '#27ae60' },
+  textoProgresso: { fontSize: 12, color: '#333', marginBottom: 12 },
   card: {
     backgroundColor: '#f5f5f5',
     padding: 12,
     borderRadius: 8,
     marginBottom: 10,
   },
-  codigo: {
+  codigo: { fontWeight: 'bold', fontSize: 14 },
+  statusTag: {
+    marginLeft: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+    color: '#fff',
+    fontSize: 12,
     fontWeight: 'bold',
-    marginBottom: 4,
   },
   form: {
     flexDirection: 'row',
@@ -309,10 +345,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 6,
   },
-  textoBotao: {
-    color: '#fff',
-    fontWeight: 'bold',
-  },
+  textoBotao: { color: '#fff', fontWeight: 'bold' },
   botaoEditar: {
     backgroundColor: '#f39c12',
     paddingVertical: 6,
@@ -320,34 +353,17 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     alignSelf: 'flex-start',
   },
-  textoEditar: {
-    color: '#fff',
-    fontWeight: 'bold',
-  },
-  rodape: {
-    marginTop: 12,
-    borderTopWidth: 1,
-    borderColor: '#ccc',
-    paddingTop: 10,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  botaoCaminhao: {
-    backgroundColor: '#3498db',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-  },
-  iconeCaminhao: {
-    fontSize: 24,
-    color: '#fff',
-  },
-  botaoSeparacao: {
+  textoEditar: { color: '#fff', fontWeight: 'bold' },
+  botaoEtapa: {
     backgroundColor: '#27ae60',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    marginHorizontal: 16,
+    padding: 14,
     borderRadius: 10,
     alignItems: 'center',
+    marginBottom: 16,
+  },
+  botaoEtapaDesativado: {
+    backgroundColor: '#95a5a6',
   },
 });
 

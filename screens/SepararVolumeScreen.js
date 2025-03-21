@@ -1,6 +1,6 @@
 // SepararVolumeScreen.js
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -17,10 +17,51 @@ import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../lib/supabaseClient';
 
 const SepararVolumeScreen = ({ route, navigation }) => {
-  const { item, ordem } = route.params;
+  const { item: itemOriginal, ordem } = route.params;
+
+  const [item, setItem] = useState(itemOriginal); // 🔄 manter sempre atualizado
   const [nVolume, setNVolume] = useState('');
   const [quantidade, setQuantidade] = useState('');
   const [fotos, setFotos] = useState(['', '', '', '']);
+  const [saldoAtual, setSaldoAtual] = useState(itemOriginal.saldo_separar);
+  const [concluirHabilitado, setConcluirHabilitado] = useState(false); // 🚫
+
+  // 🔄 Carregar saldo atualizado da base
+  useEffect(() => {
+    const fetchItemAtualizado = async () => {
+      const { data, error } = await supabase
+        .from('itens_ordem')
+        .select('*')
+        .eq('id', itemOriginal.id)
+        .maybeSingle();
+
+      if (!error && data) {
+        setItem(data);
+        setSaldoAtual(data.saldo_separar);
+      }
+    };
+
+    fetchItemAtualizado();
+  }, []);
+
+  // Atualiza saldo na digitação
+  useEffect(() => {
+    const qtd = parseInt(quantidade);
+    if (!isNaN(qtd)) {
+      const novoSaldo = item.saldo_separar - qtd;
+      setSaldoAtual(novoSaldo >= 0 ? novoSaldo : 0);
+    } else {
+      setSaldoAtual(item.saldo_separar);
+    }
+
+    setConcluirHabilitado(
+      nVolume !== '' &&
+      !isNaN(qtd) &&
+      qtd > 0 &&
+      qtd <= item.saldo_separar &&
+      fotos.some(f => f !== '')
+    );
+  }, [quantidade, nVolume, fotos]);
 
   const handleSelectImage = async (index) => {
     Alert.alert(
@@ -68,6 +109,13 @@ const SepararVolumeScreen = ({ route, navigation }) => {
     );
   };
 
+  // 🗑 Remover imagem
+  const handleRemoverFoto = (index) => {
+    const novasFotos = [...fotos];
+    novasFotos[index] = '';
+    setFotos(novasFotos);
+  };
+
   const uploadImage = async (uri) => {
     try {
       if (!uri) {
@@ -96,29 +144,33 @@ const SepararVolumeScreen = ({ route, navigation }) => {
         .from('bucket1')
         .getPublicUrl(`fotos/${nomeArquivo}`).data;
 
-      console.log('[URL DA IMAGEM]:', publicUrl);
       return publicUrl;
     } catch (err) {
-      console.error('[UPLOAD ERROR]', err.message);
       Alert.alert('Erro de conexão', 'Ocorreu um erro ao enviar a imagem.');
       return null;
     }
   };
 
   const handleConcluir = async () => {
-    if (!nVolume || !quantidade || parseInt(quantidade) <= 0) {
+    const qtdInt = parseInt(quantidade);
+    if (!nVolume || !quantidade || qtdInt <= 0) {
       Alert.alert('Preencha todos os campos com valores válidos.');
+      return;
+    }
+
+    if (qtdInt > item.qtde_definida) {
+      Alert.alert('Erro', 'Quantidade maior do que a quantidade definida para esse item.');
+      return;
+    }
+
+    if (qtdInt > item.saldo_separar) {
+      Alert.alert('Erro', 'Quantidade maior do que o saldo a separar.');
       return;
     }
 
     const fotosPreenchidas = fotos.filter(f => f !== '');
     if (fotosPreenchidas.length === 0) {
       Alert.alert('Erro', 'É necessário adicionar pelo menos uma foto.');
-      return;
-    }
-
-    if (parseInt(quantidade) > item.saldo_separar) {
-      Alert.alert('Erro', 'Quantidade maior do que o saldo a separar.');
       return;
     }
 
@@ -136,7 +188,7 @@ const SepararVolumeScreen = ({ route, navigation }) => {
 
     const { error } = await supabase.from('itens_volume').insert({
       id_itens: item.id,
-      quantidade: parseInt(quantidade),
+      quantidade: qtdInt,
       nVolume,
       foto1: fotos[0],
       foto2: fotos[1],
@@ -154,7 +206,7 @@ const SepararVolumeScreen = ({ route, navigation }) => {
       return;
     }
 
-    const novaSeparada = (item.qtde_separada || 0) + parseInt(quantidade);
+    const novaSeparada = (item.qtde_separada || 0) + qtdInt;
     const novoSaldo = item.qtde_definida - novaSeparada;
 
     await supabase
@@ -177,7 +229,7 @@ const SepararVolumeScreen = ({ route, navigation }) => {
         <Text style={styles.info}>Contrato: {ordem?.contrato}</Text>
         <Text style={styles.info}>Código: {item.codigo}</Text>
         <Text style={styles.info}>Descrição: {item.descricao}</Text>
-        <Text style={styles.info}>Saldo a Separar: {item.saldo_separar}</Text>
+        <Text style={styles.info}>Saldo a Separar: {saldoAtual}</Text>
 
         <TextInput
           style={styles.input}
@@ -192,27 +244,50 @@ const SepararVolumeScreen = ({ route, navigation }) => {
           placeholder="Quantidade no Volume"
           keyboardType="numeric"
           value={quantidade}
-          onChangeText={setQuantidade}
+          onChangeText={(text) => {
+            const qtd = parseInt(text);
+            if (!isNaN(qtd) && qtd > item.qtde_definida) {
+              Alert.alert('Atenção', 'Quantidade maior que a quantidade definida.');
+              return;
+            }
+            setQuantidade(text);
+          }}
         />
 
         <Text style={styles.subtitulo}>Fotos do Volume (mínimo 1)</Text>
         <View style={styles.fotoContainer}>
           {fotos.map((foto, index) => (
-            <TouchableOpacity
-              key={index}
-              style={styles.fotoBox}
-              onPress={() => handleSelectImage(index)}
-            >
-              {foto ? (
-                <Image source={{ uri: foto }} style={styles.foto} />
-              ) : (
-                <Text style={styles.fotoTexto}>+</Text>
+            <View key={index} style={styles.fotoWrapper}>
+              <TouchableOpacity
+                style={styles.fotoBox}
+                onPress={() => handleSelectImage(index)}
+              >
+                {foto ? (
+                  <Image source={{ uri: foto }} style={styles.foto} />
+                ) : (
+                  <Text style={styles.fotoTexto}>+</Text>
+                )}
+              </TouchableOpacity>
+              {foto !== '' && (
+                <TouchableOpacity
+                  onPress={() => handleRemoverFoto(index)}
+                  style={styles.removerBtn}
+                >
+                  <Text style={{ color: 'white' }}>X</Text>
+                </TouchableOpacity>
               )}
-            </TouchableOpacity>
+            </View>
           ))}
         </View>
 
-        <TouchableOpacity style={styles.botao} onPress={handleConcluir}>
+        <TouchableOpacity
+          style={[
+            styles.botao,
+            !concluirHabilitado && { backgroundColor: '#ccc' }, // 🚫
+          ]}
+          onPress={handleConcluir}
+          disabled={!concluirHabilitado}
+        >
           <Text style={styles.botaoTexto}>Concluir</Text>
         </TouchableOpacity>
       </ScrollView>
@@ -249,13 +324,17 @@ const styles = StyleSheet.create({
   },
   fotoContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     flexWrap: 'wrap',
     gap: 8,
   },
-  fotoBox: {
+  fotoWrapper: {
+    position: 'relative',
     width: '23%',
     aspectRatio: 1,
+  },
+  fotoBox: {
+    width: '100%',
+    height: '100%',
     borderWidth: 1,
     borderColor: '#999',
     justifyContent: 'center',
@@ -271,6 +350,15 @@ const styles = StyleSheet.create({
   fotoTexto: {
     fontSize: 24,
     color: '#888',
+  },
+  removerBtn: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    backgroundColor: 'red',
+    borderRadius: 10,
+    padding: 4,
+    zIndex: 1,
   },
   botao: {
     backgroundColor: '#27ae60',
