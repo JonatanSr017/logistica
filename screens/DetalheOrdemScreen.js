@@ -1,5 +1,3 @@
-// DetalheOrdemScreen.js
-
 import React, { useEffect, useState } from 'react';
 import {
   View,
@@ -17,7 +15,7 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabaseClient';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 
 const DetalheOrdemScreen = ({ route }) => {
   const navigation = useNavigation();
@@ -31,6 +29,18 @@ const DetalheOrdemScreen = ({ route }) => {
   const [podeEmbarcar, setPodeEmbarcar] = useState(false);
   const [porcentagemSeparacao, setPorcentagemSeparacao] = useState(0);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [cargaTotalAtiva, setCargaTotalAtiva] = useState(false);
+
+  // Adicionar listeners para o teclado
+  useEffect(() => {
+    const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
+    const keyboardDidHideListener = Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false));
+
+    return () => {
+      keyboardDidShowListener.remove();
+      keyboardDidHideListener.remove();
+    };
+  }, []);
 
   const buscarUsuario = async () => {
     const { data, error } = await supabase.auth.getUser();
@@ -42,12 +52,21 @@ const DetalheOrdemScreen = ({ route }) => {
     const { data, error } = await supabase
       .from('itens_ordem')
       .select('*')
-      .eq('chave_contrato_carga_obra', ordem.chave_contrato_carga_obra);
+      .eq('chave_contrato_carga_obra', ordem.chave_contrato_carga_obra)
+      .order('descricao', { ascending: true });
 
     if (error) {
       Alert.alert('Erro ao buscar itens', error.message);
     } else {
-      setItens(data);
+      // Garantir que os campos numéricos estejam corretos
+      const itensFormatados = data.map(item => ({
+        ...item,
+        qtde_definida: Number(item.qtde_definida) || 0,
+        qtde_separada: Number(item.qtde_separada) || 0,
+        carga: Number(item.carga) || 0,
+        saldo_separar: Number(item.saldo_separar) || 0
+      }));
+      setItens(itensFormatados);
     }
     setLoading(false);
   };
@@ -58,18 +77,11 @@ const DetalheOrdemScreen = ({ route }) => {
   }, []);
 
   useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', () => {
-      buscarItens();
-    });
-    return unsubscribe;
-  }, [navigation]);
-
-  useEffect(() => {
     const verificarProgresso = () => {
       const itensComQtde = itens.filter((item) => item.qtde_definida > 0);
       const total = itensComQtde.length;
       const concluidos = itensComQtde.filter(
-        (item) => item.qtde_separada === item.qtde_definida
+        (item) => item.qtde_separada >= item.qtde_definida
       ).length;
 
       const todosSeparados = total > 0 && concluidos === total;
@@ -82,156 +94,118 @@ const DetalheOrdemScreen = ({ route }) => {
     verificarProgresso();
   }, [itens]);
 
-  useEffect(() => {
-    const showSubscription = Keyboard.addListener('keyboardDidShow', () => {
-      setKeyboardVisible(true);
-    });
-    const hideSubscription = Keyboard.addListener('keyboardDidHide', () => {
-      setKeyboardVisible(false);
-    });
-
-    return () => {
-      showSubscription.remove();
-      hideSubscription.remove();
-    };
-  }, []);
-
-  const atualizarQuantidadeItem = async (itemId, novaQtde) => {
+  const atualizarQuantidadeItem = async (itemId, novaQuantidade) => {
     const { error } = await supabase
       .from('itens_ordem')
-      .update({
-        qtde_definida: novaQtde,
-        saldo_separar: novaQtde,
-        selecionado: novaQtde > 0,
-      })
+      .update({ qtde_definida: novaQuantidade })
       .eq('id', itemId);
+
     return error;
   };
 
+  const excluirVolumesEFotos = async (itemId) => {
+    // Supondo que exista uma tabela 'volumes' relacionada
+    const { error } = await supabase
+      .from('volumes')
+      .delete()
+      .eq('item_id', itemId);
+
+    if (error) {
+      Alert.alert('Erro ao excluir volumes', error.message);
+      return false;
+    }
+    return true;
+  };
+
   const confirmarQuantidade = async (item) => {
-    let entrada = quantidades[item.id];
-    if (entrada === '' || entrada === null || entrada === undefined) {
-      entrada = '0';
-    }
-
-    const novaQtde = parseInt(entrada);
-    const antigaQtde = item.qtde_definida || 0;
-
-    if (isNaN(novaQtde) || novaQtde < 0) {
-      Alert.alert('Atenção', 'Informe uma quantidade válida (0 ou mais).');
+    const novaQtde = parseInt(quantidades[item.id]) || 0;
+    
+    if (novaQtde < 0) {
+      Alert.alert('Erro', 'A quantidade não pode ser negativa');
       return;
     }
 
-    const saldoDisponivel = item.carga + antigaQtde;
-    if (novaQtde > saldoDisponivel) {
-      Alert.alert('Erro', 'Quantidade não pode ser maior que o saldo disponível.');
+    if (novaQtde > item.carga) {
+      Alert.alert('Erro', 'A quantidade não pode exceder o saldo do contrato');
       return;
-    }
-
-    const { data: volumes, error: volumeError } = await supabase
-      .from('itens_volume')
-      .select('*')
-      .eq('id_itens', item.id);
-
-    if (volumeError) {
-      Alert.alert('Erro ao verificar volumes', volumeError.message);
-      return;
-    }
-
-    if (volumes.length > 0 && novaQtde !== antigaQtde) {
-      const confirmarExclusao = await new Promise((resolve) => {
-        Alert.alert(
-          'Atenção',
-          'Alterar a quantidade definida irá excluir todos os volumes separados e fotos relacionadas a esta peça. Deseja continuar?',
-          [
-            { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
-            { text: 'Sim, continuar', onPress: () => resolve(true) },
-          ]
-        );
-      });
-
-      if (!confirmarExclusao) return;
-
-      const fotosParaExcluir = [];
-      volumes.forEach((v) => {
-        [v.foto1, v.foto2, v.foto3, v.foto4].forEach((foto) => {
-          if (foto) {
-            const partes = foto.split('/bucket1/');
-            if (partes.length > 1) {
-              fotosParaExcluir.push(`fotos/${partes[1]}`);
-            }
-          }
-        });
-      });
-
-      if (fotosParaExcluir.length > 0) {
-        const { error: deleteFotosError } = await supabase.storage
-          .from('bucket1')
-          .remove(fotosParaExcluir);
-
-        if (deleteFotosError) {
-          Alert.alert('Erro ao excluir fotos', deleteFotosError.message);
-          return;
-        }
-      }
-
-      const { error: deleteVolumesError } = await supabase
-        .from('itens_volume')
-        .delete()
-        .eq('id_itens', item.id);
-
-      if (deleteVolumesError) {
-        Alert.alert('Erro ao excluir volumes', deleteVolumesError.message);
-        return;
-      }
-
-      const { error: updateError } = await supabase
-        .from('itens_ordem')
-        .update({ qtde_separada: 0 })
-        .eq('id', item.id);
-
-      if (updateError) {
-        Alert.alert('Erro ao atualizar qtde_separada', updateError.message);
-        return;
-      }
     }
 
     const error = await atualizarQuantidadeItem(item.id, novaQtde);
-
     if (error) {
-      Alert.alert('Erro ao salvar', error.message);
+      Alert.alert('Erro', error.message);
     } else {
-      setItens((prevItens) =>
-        prevItens.map((i) =>
-          i.id === item.id
-            ? {
-                ...i,
-                qtde_definida: novaQtde,
-                saldo_separar: novaQtde,
-                selecionado: novaQtde > 0,
-                qtde_separada:
-                  (volumes.length > 0 && novaQtde !== antigaQtde) ? 0 : i.qtde_separada,
-              }
-            : i
-        )
-      );
       setModoEdicao({ ...modoEdicao, [item.id]: false });
-      Alert.alert('Sucesso', `Quantidade de ${item.codigo} atualizada para ${novaQtde}.`);
+      buscarItens(); // Atualiza a lista após salvar
     }
   };
 
-  const renderItem = ({ item }) => {
+  const aplicarSaldoACarregar = async () => {
+    const confirmar = await new Promise((resolve) => {
+      Alert.alert(
+        cargaTotalAtiva ? 'Cancelar definição automática' : 'Confirmar definição automática',
+        cargaTotalAtiva
+          ? 'Deseja cancelar a definição de carga total e restaurar os valores anteriores?'
+          : 'Deseja definir a quantidade de todas as peças com o saldo a carregar? Todos os volumes existentes serão excluídos.',
+        [
+          { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
+          { text: cargaTotalAtiva ? 'Sim, cancelar' : 'Sim, aplicar', onPress: () => resolve(true) },
+        ]
+      );
+    });
+
+    if (!confirmar) return;
+
+    setLoading(true);
+    if (cargaTotalAtiva) {
+      // Reverter para 0 ou valor inicial desejado
+      for (const item of itens) {
+        const error = await atualizarQuantidadeItem(item.id, 0);
+        if (error) {
+          Alert.alert('Erro ao cancelar carga', `Erro no item ${item.codigo}: ${error.message}`);
+          setLoading(false);
+          return;
+        }
+      }
+      setCargaTotalAtiva(false);
+      Alert.alert('Sucesso', 'A carga total foi cancelada.');
+    } else {
+      for (const item of itens) {
+        const novaQtde = item.carga;
+        if (novaQtde !== item.qtde_definida) {
+          const sucesso = await excluirVolumesEFotos(item.id);
+          if (!sucesso) {
+            setLoading(false);
+            return;
+          }
+        }
+
+        const error = await atualizarQuantidadeItem(item.id, novaQtde);
+        if (error) {
+          Alert.alert('Erro ao aplicar saldo', `Erro no item ${item.codigo}: ${error.message}`);
+          setLoading(false);
+          return;
+        }
+      }
+      setCargaTotalAtiva(true);
+      Alert.alert('Sucesso', 'Quantidade atualizada com o saldo a carregar.');
+    }
+    await buscarItens();
+    setLoading(false);
+  };
+
+  const renderItem = (item) => {
     const emEdicao = modoEdicao[item.id];
     const entradaAtual = quantidades[item.id] !== undefined
       ? parseInt(quantidades[item.id]) || 0
       : item.qtde_definida || 0;
 
     const saldoACarregar = item.carga - entradaAtual;
+    const faltamSeparar = item.qtde_definida - item.qtde_separada;
 
     let statusCor = '#ccc';
     let statusTexto = '🔴 Não definido';
 
-    if (item.qtde_definida > 0 && item.qtde_separada === item.qtde_definida) {
+    if (item.qtde_definida > 0 && item.qtde_separada >= item.qtde_definida) {
       statusCor = '#2ecc71';
       statusTexto = '🟢 Separado';
     } else if (item.qtde_separada > 0 && item.qtde_separada < item.qtde_definida) {
@@ -247,8 +221,9 @@ const DetalheOrdemScreen = ({ route }) => {
         </View>
 
         <Text>Descrição: {item.descricao}</Text>
-        <Text>Saldo a Carregar: {saldoACarregar}</Text>
+        <Text>Saldo do Contrato: {saldoACarregar}</Text>
         <Text>Quantidade Definida: {item.qtde_definida || 0}</Text>
+        <Text>Faltam separar: {faltamSeparar} peças</Text>
 
         {emEdicao ? (
           <View style={styles.form}>
@@ -256,7 +231,7 @@ const DetalheOrdemScreen = ({ route }) => {
               style={styles.input}
               keyboardType="numeric"
               placeholder="Nova quantidade"
-              value={quantidades[item.id] || ''}
+              value={quantidades[item.id]?.toString() || ''}
               onChangeText={(text) =>
                 setQuantidades({ ...quantidades, [item.id]: text })
               }
@@ -287,19 +262,19 @@ const DetalheOrdemScreen = ({ route }) => {
                 styles.botaoEditar,
                 {
                   backgroundColor:
-                    item.qtde_definida > 0 && item.saldo_separar > 0 ? '#2980b9' : '#ccc',
+                    item.qtde_definida > 0 && faltamSeparar > 0 ? '#2980b9' : '#ccc',
                 },
               ]}
               onPress={() => {
                 if (item.qtde_definida === 0) {
                   Alert.alert('Atenção', 'Defina uma quantidade antes de separar o volume.');
-                } else if (item.saldo_separar <= 0) {
+                } else if (faltamSeparar <= 0) {
                   Alert.alert('Atenção', 'Todos os volumes deste item já foram separados.');
                 } else {
                   navigation.navigate('SepararVolume', { item, ordem });
                 }
               }}
-              disabled={item.qtde_definida === 0 || item.saldo_separar <= 0}
+              disabled={item.qtde_definida === 0 || faltamSeparar <= 0}
             >
               <Text style={styles.textoEditar}>Separar Volume</Text>
             </TouchableOpacity>
@@ -337,29 +312,41 @@ const DetalheOrdemScreen = ({ route }) => {
           <View style={{ flex: 1 }}>
             {loading ? (
               <ActivityIndicator size="large" color="#0000ff" />
+            ) : itens.length > 0 ? (
+              itens.map((item) => renderItem(item))
             ) : (
-              itens.map((item) => renderItem({ item }))
+              <Text style={{ textAlign: 'center', marginTop: 20 }}>Nenhum item encontrado</Text>
             )}
           </View>
         </ScrollView>
 
         {!keyboardVisible && (
-          <TouchableOpacity
-            style={[styles.botaoEtapa, !podeEmbarcar && styles.botaoEtapaDesativado]}
-            onPress={() => {
-              if (!podeEmbarcar) {
-                Alert.alert(
-                  'Atenção',
-                  'Ainda existem itens com quantidade definida que não foram totalmente separados.'
-                );
-                return;
-              }
-              navigation.navigate('VisualizarVolumesScreen', { ordem });
-            }}
-            disabled={!podeEmbarcar}
-          >
-            <Text style={[styles.textoBotao, !podeEmbarcar && { color: '#ecf0f1' }]}>Volumes</Text>
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', margin: 16 }}>
+            <TouchableOpacity
+              style={[styles.botaoEtapa, { flexDirection: 'row', alignItems: 'center' }]}
+              onPress={aplicarSaldoACarregar}
+            >
+              <FontAwesome5 name="truck" size={18} color="#fff" style={{ marginRight: 8 }} />
+              <Text style={styles.textoBotao}>{cargaTotalAtiva ? 'Cancelar Carga Total' : 'Carga Total'}</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.botaoEtapa, !podeEmbarcar && styles.botaoEtapaDesativado]}
+              onPress={() => {
+                if (!podeEmbarcar) {
+                  Alert.alert(
+                    'Atenção',
+                    'Ainda existem itens com quantidade definida que não foram totalmente separados.'
+                  );
+                  return;
+                }
+                navigation.navigate('VisualizarVolumesScreen', { ordem });
+              }}
+              disabled={!podeEmbarcar}
+            >
+              <Text style={[styles.textoBotao, !podeEmbarcar && { color: '#ecf0f1' }]}>Volumes</Text>
+            </TouchableOpacity>
+          </View>
         )}
       </SafeAreaView>
     </KeyboardAvoidingView>
@@ -386,8 +373,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#555',
   },
-  titulo: { fontSize: 16, fontWeight: 'bold', marginBottom: 4 },
-  cliente: { fontSize: 14, color: '#333', marginBottom: 12 },
   progressoContainer: {
     height: 10,
     backgroundColor: '#ecf0f1',
@@ -445,7 +430,6 @@ const styles = StyleSheet.create({
   textoEditar: { color: '#fff', fontWeight: 'bold' },
   botaoEtapa: {
     backgroundColor: '#27ae60',
-    margin: 16,
     padding: 14,
     borderRadius: 10,
     alignItems: 'center',

@@ -16,6 +16,7 @@ import { supabase } from '../lib/supabaseClient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { AutocompleteDropdown } from 'react-native-autocomplete-dropdown';
 
 const SepararVolumeScreen = ({ route }) => {
   const { item: itemOriginal, ordem } = route.params;
@@ -27,6 +28,7 @@ const SepararVolumeScreen = ({ route }) => {
   const [saldoAtual, setSaldoAtual] = useState(itemOriginal.saldo_separar);
   const [concluirHabilitado, setConcluirHabilitado] = useState(false);
   const [usuario, setUsuario] = useState(null);
+  const [volumesExistentes, setVolumesExistentes] = useState([]);
 
   const navigation = useNavigation();
 
@@ -54,6 +56,29 @@ const SepararVolumeScreen = ({ route }) => {
     };
 
     fetchItemAtualizado();
+  }, []);
+
+  useEffect(() => {
+    const buscarVolumes = async () => {
+      const { data, error } = await supabase
+        .from('itens_volume')
+        .select('nVolume')
+        .eq('id_itens', itemOriginal.id);
+
+      if (!error && data) {
+        console.log('Volumes encontrados:', data);
+        const lista = data.map((v, index) => ({
+          id: index.toString(),
+          title: String(v.nVolume), // Garantir que é string
+        }));
+        console.log('DataSet enviado ao dropdown:', lista);
+        setVolumesExistentes(lista);
+      } else {
+        console.log('Erro ao buscar volumes:', error);
+      }
+    };
+
+    buscarVolumes();
   }, []);
 
   useEffect(() => {
@@ -240,12 +265,36 @@ const SepararVolumeScreen = ({ route }) => {
           <Text style={styles.info}>Descrição: {item.descricao}</Text>
           <Text style={styles.info}>Saldo a Separar: {saldoAtual}</Text>
 
-          <TextInput
-            style={styles.input}
-            placeholder="Número do Volume"
-            keyboardType="numeric"
-            value={nVolume}
-            onChangeText={setNVolume}
+          <Text style={{ fontWeight: 'bold', marginBottom: 6 }}>Número do Volume</Text>
+          <AutocompleteDropdown
+            clearOnFocus={false}
+            closeOnBlur={true}
+            closeOnSubmit={false}
+            initialValue={nVolume}
+            dataSet={volumesExistentes}
+            onSelectItem={(item) => {
+              if (item) setNVolume(item.title);
+            }}
+            textInputProps={{
+              placeholder: 'Digite ou selecione um volume',
+              value: nVolume,
+              onChangeText: setNVolume,
+              style: {
+                backgroundColor: '#fff',
+                borderColor: '#ccc',
+                borderWidth: 1,
+                padding: 10,
+                borderRadius: 6,
+                fontSize: 16,
+              },
+            }}
+            inputContainerStyle={{ marginBottom: 12 }}
+            suggestionsListContainerStyle={{
+              backgroundColor: '#fff',
+              borderColor: '#ccc',
+              borderWidth: 1,
+              borderRadius: 6,
+            }}
           />
 
           <TextInput
