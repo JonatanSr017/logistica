@@ -1,5 +1,14 @@
+// HomeScreen.js
+
 import React, { useEffect, useState } from 'react';
-import { View, FlatList, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import {
+  View,
+  FlatList,
+  StyleSheet,
+  ActivityIndicator,
+  Alert,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import OrdemCard from '../components/OrdemCard';
 import { supabase } from '../lib/supabaseClient';
 
@@ -10,18 +19,17 @@ const HomeScreen = ({ navigation }) => {
   const buscarOrdens = async () => {
     setLoading(true);
     const { data, error } = await supabase
-    .from('ordens')
-    .select('*')
-    .eq('finalizado', false)
-    .order('data_hora_entrega', { ascending: false })
+      .from('ordens')
+      .select('*')
+      .eq('finalizado', false)
+      .order('data_hora_entrega', { ascending: false });
 
     if (error) {
       Alert.alert('Erro ao buscar ordens', error.message);
-      setLoading(false);
     } else {
       setOrdens(data);
-      setLoading(false);
     }
+    setLoading(false);
   };
 
   useEffect(() => {
@@ -30,14 +38,14 @@ const HomeScreen = ({ navigation }) => {
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
+      <SafeAreaView style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#0000ff" />
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <FlatList
         data={ordens}
         keyExtractor={(item) => item.id.toString()}
@@ -52,7 +60,7 @@ const HomeScreen = ({ navigation }) => {
           />
         )}
       />
-    </View>
+    </SafeAreaView>
   );
 };
 
@@ -66,6 +74,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#fff',
   },
 });
 

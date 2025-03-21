@@ -15,20 +15,27 @@ import {
   Keyboard,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabaseClient';
+import { Ionicons } from '@expo/vector-icons';
 
 const DetalheOrdemScreen = ({ route }) => {
   const navigation = useNavigation();
   const { ordem } = route.params;
 
+  const [usuario, setUsuario] = useState(null);
   const [itens, setItens] = useState([]);
   const [quantidades, setQuantidades] = useState({});
   const [modoEdicao, setModoEdicao] = useState({});
   const [loading, setLoading] = useState(true);
-  const [cargaTotalAplicada, setCargaTotalAplicada] = useState(false);
   const [podeEmbarcar, setPodeEmbarcar] = useState(false);
   const [porcentagemSeparacao, setPorcentagemSeparacao] = useState(0);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+
+  const buscarUsuario = async () => {
+    const { data, error } = await supabase.auth.getUser();
+    if (!error) setUsuario(data.user);
+  };
 
   const buscarItens = async () => {
     setLoading(true);
@@ -46,6 +53,7 @@ const DetalheOrdemScreen = ({ route }) => {
   };
 
   useEffect(() => {
+    buscarUsuario();
     buscarItens();
   }, []);
 
@@ -252,9 +260,17 @@ const DetalheOrdemScreen = ({ route }) => {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={80}
     >
-      <View style={styles.container}>
-        <Text style={styles.titulo}>Itens da Ordem {ordem.contrato}</Text>
-        <Text numberOfLines={1} style={styles.cliente}>{ordem.cliente}</Text>
+      <SafeAreaView style={styles.container}>
+        {/* Cabeçalho padrão */}
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()}>
+            <Ionicons name="arrow-back" size={24} color="#000" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Itens da Ordem {ordem.contrato}</Text>
+          <Text style={styles.userInfo}>
+            {usuario ? usuario.email : 'Carregando...'}
+          </Text>
+        </View>
 
         <View style={styles.progressoContainer}>
           <View style={[styles.barraProgresso, { width: `${porcentagemSeparacao}%` }]} />
@@ -284,20 +300,38 @@ const DetalheOrdemScreen = ({ route }) => {
                 );
                 return;
               }
-              navigation.navigate('FinalizarEmbarque', { ordem });
+              navigation.navigate('VisualizarVolumesScreen', { ordem });
             }}
             disabled={!podeEmbarcar}
           >
-            <Text style={[styles.textoBotao, !podeEmbarcar && { color: '#ecf0f1' }]}>Embarcar</Text>
+            <Text style={[styles.textoBotao, !podeEmbarcar && { color: '#ecf0f1' }]}>Volumes</Text>
           </TouchableOpacity>
         )}
-      </View>
+      </SafeAreaView>
     </KeyboardAvoidingView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16, backgroundColor: '#fff' },
+  container: { flex: 1, backgroundColor: '#fff' },
+  header: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#f9f9f9',
+    borderBottomWidth: 1,
+    borderBottomColor: '#ddd',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: 4,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  userInfo: {
+    fontSize: 12,
+    color: '#555',
+  },
   titulo: { fontSize: 16, fontWeight: 'bold', marginBottom: 4 },
   cliente: { fontSize: 14, color: '#333', marginBottom: 12 },
   progressoContainer: {
@@ -305,15 +339,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#ecf0f1',
     borderRadius: 6,
     overflow: 'hidden',
-    marginBottom: 8,
+    margin: 16,
   },
   barraProgresso: { height: '100%', backgroundColor: '#27ae60' },
-  textoProgresso: { fontSize: 12, color: '#333', marginBottom: 12 },
+  textoProgresso: { fontSize: 12, color: '#333', marginHorizontal: 16, marginBottom: 8 },
   card: {
     backgroundColor: '#f5f5f5',
     padding: 12,
     borderRadius: 8,
     marginBottom: 10,
+    marginHorizontal: 16,
   },
   codigo: { fontWeight: 'bold', fontSize: 14 },
   statusTag: {
@@ -356,11 +391,10 @@ const styles = StyleSheet.create({
   textoEditar: { color: '#fff', fontWeight: 'bold' },
   botaoEtapa: {
     backgroundColor: '#27ae60',
-    marginHorizontal: 16,
+    margin: 16,
     padding: 14,
     borderRadius: 10,
     alignItems: 'center',
-    marginBottom: 16,
   },
   botaoEtapaDesativado: {
     backgroundColor: '#95a5a6',

@@ -1,5 +1,4 @@
-
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,12 +11,27 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../lib/supabaseClient';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 
-const FinalizarEmbarqueScreen = ({ route, navigation }) => {
+const FinalizarEmbarqueScreen = ({ route }) => {
   const { ordem } = route.params;
+  const navigation = useNavigation();
+
   const [motorista, setMotorista] = useState('');
   const [placa, setPlaca] = useState('');
   const [fotos, setFotos] = useState([]);
+  const [usuario, setUsuario] = useState(null);
+
+  useEffect(() => {
+    buscarUsuario();
+  }, []);
+
+  const buscarUsuario = async () => {
+    const { data, error } = await supabase.auth.getUser();
+    if (!error) setUsuario(data.user);
+  };
 
   const handleSelectImage = async () => {
     if (fotos.length >= 10) {
@@ -25,16 +39,12 @@ const FinalizarEmbarqueScreen = ({ route, navigation }) => {
       return;
     }
 
-    const result = await ImagePicker.launchCameraAsync({
-      quality: 0.7,
-    });
+    const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
 
     if (!result.canceled) {
       const uri = result.assets[0].uri;
       const url = await uploadImage(uri);
-      if (url) {
-        setFotos([...fotos, url]);
-      }
+      if (url) setFotos([...fotos, url]);
     }
   };
 
@@ -44,7 +54,7 @@ const FinalizarEmbarqueScreen = ({ route, navigation }) => {
       const arrayBuffer = await response.arrayBuffer();
       const nomeArquivo = `${Date.now()}.jpg`;
 
-      const { data, error } = await supabase.storage
+      const { error } = await supabase.storage
         .from('bucket1')
         .upload(`fotos/${nomeArquivo}`, new Uint8Array(arrayBuffer), {
           contentType: 'image/jpeg',
@@ -61,7 +71,7 @@ const FinalizarEmbarqueScreen = ({ route, navigation }) => {
         .getPublicUrl(`fotos/${nomeArquivo}`).data;
 
       return publicUrl;
-    } catch (err) {
+    } catch {
       Alert.alert('Erro de conexão', 'Ocorreu um erro ao enviar a imagem.');
       return null;
     }
@@ -80,21 +90,21 @@ const FinalizarEmbarqueScreen = ({ route, navigation }) => {
     }
 
     const { error } = await supabase.from('embarque_ordem').insert({
-        chave_contrato_carga_obra: ordem.chave_contrato_carga_obra,
-        nome_motorista: motorista,
-        placa_caminhao: placa,
-        foto1: fotos[0] || null,
-        foto2: fotos[1] || null,
-        foto3: fotos[2] || null,
-        foto4: fotos[3] || null,
-        foto5: fotos[4] || null,
-        foto6: fotos[5] || null,
-        foto7: fotos[6] || null,
-        foto8: fotos[7] || null,
-        foto9: fotos[8] || null,
-        foto10: fotos[9] || null,
-        data_hora: new Date().toISOString(),
-      });
+      chave_contrato_carga_obra: ordem.chave_contrato_carga_obra,
+      nome_motorista: motorista,
+      placa_caminhao: placa,
+      foto1: fotos[0] || null,
+      foto2: fotos[1] || null,
+      foto3: fotos[2] || null,
+      foto4: fotos[3] || null,
+      foto5: fotos[4] || null,
+      foto6: fotos[5] || null,
+      foto7: fotos[6] || null,
+      foto8: fotos[7] || null,
+      foto9: fotos[8] || null,
+      foto10: fotos[9] || null,
+      data_hora: new Date().toISOString(),
+    });
 
     if (error) {
       Alert.alert('Erro ao salvar embarque', error.message);
@@ -111,56 +121,84 @@ const FinalizarEmbarqueScreen = ({ route, navigation }) => {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.titulo}>Finalizar Embarque</Text>
-
-      <TextInput
-        style={styles.input}
-        placeholder="Nome do Motorista"
-        value={motorista}
-        onChangeText={setMotorista}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Placa do Caminhão"
-        value={placa}
-        onChangeText={setPlaca}
-      />
-
-      <TouchableOpacity style={styles.botaoFoto} onPress={handleSelectImage}>
-        <Text style={styles.botaoTexto}>Tirar/Selecionar Foto</Text>
-      </TouchableOpacity>
-
-      <View style={styles.fotoContainer}>
-        {fotos.map((foto, index) => (
-          <View key={index} style={styles.fotoWrapper}>
-            <Image source={{ uri: foto }} style={styles.foto} />
-            <TouchableOpacity
-              style={styles.removerBotao}
-              onPress={() => removerFoto(index)}
-            >
-              <Text style={styles.removerTexto}>✕</Text>
-            </TouchableOpacity>
-          </View>
-        ))}
+    <SafeAreaView style={styles.safeArea}>
+      {/* Cabeçalho padrão */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <Ionicons name="arrow-back" size={24} color="#000" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Finalizar Embarque</Text>
+        <Text style={styles.userInfo}>
+          {usuario ? usuario.email : 'Carregando...'}
+        </Text>
       </View>
 
-      <TouchableOpacity style={styles.botaoFinalizar} onPress={handleFinalizar}>
-        <Text style={styles.botaoTexto}>Finalizar Embarque</Text>
-      </TouchableOpacity>
-    </ScrollView>
+      <ScrollView contentContainerStyle={styles.container}>
+        <TextInput
+          style={styles.input}
+          placeholder="Nome do Motorista"
+          value={motorista}
+          onChangeText={setMotorista}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Placa do Caminhão"
+          value={placa}
+          onChangeText={setPlaca}
+        />
+
+        <TouchableOpacity style={styles.botaoFoto} onPress={handleSelectImage}>
+          <Text style={styles.botaoTexto}>Tirar/Selecionar Foto</Text>
+        </TouchableOpacity>
+
+        <View style={styles.fotoContainer}>
+          {fotos.map((foto, index) => (
+            <View key={index} style={styles.fotoWrapper}>
+              <Image source={{ uri: foto }} style={styles.foto} />
+              <TouchableOpacity
+                style={styles.removerBotao}
+                onPress={() => removerFoto(index)}
+              >
+                <Text style={styles.removerTexto}>✕</Text>
+              </TouchableOpacity>
+            </View>
+          ))}
+        </View>
+
+        <TouchableOpacity style={styles.botaoFinalizar} onPress={handleFinalizar}>
+          <Text style={styles.botaoTexto}>Finalizar Embarque</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  header: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#f9f9f9',
+    borderBottomWidth: 1,
+    borderBottomColor: '#ddd',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: 4,
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  userInfo: {
+    fontSize: 12,
+    color: '#555',
+  },
   container: {
     padding: 20,
     backgroundColor: '#fff',
-  },
-  titulo: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 12,
   },
   input: {
     borderWidth: 1,

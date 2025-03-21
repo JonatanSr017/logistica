@@ -9,6 +9,8 @@ import DetalheOrdemScreen from './screens/DetalheOrdemScreen';
 import SepararVolumeScreen from './screens/SepararVolumeScreen';
 import EmbarqueScreen from './screens/EmbarqueScreen';
 import FinalizarEmbarqueScreen from './screens/FinalizarEmbarqueScreen';
+import VisualizarVolumesScreen from './screens/VisualizarVolumesScreen';
+
 
 const Stack = createNativeStackNavigator();
 
@@ -22,6 +24,8 @@ export default function App() {
         <Stack.Screen name="SepararVolume" component={SepararVolumeScreen} options={{ title: 'Separar Volume' }} />
         <Stack.Screen name="EmbarqueScreen" component={EmbarqueScreen} options={{ title: 'Embarque e Conferência' }} />
         <Stack.Screen name="FinalizarEmbarque" component={FinalizarEmbarqueScreen} options={{ title: 'Finalizar Embarque' }} />
+        <Stack.Screen name="VisualizarVolumesScreen" component={VisualizarVolumesScreen} options={{ title: 'Volumes Separados' }}
+/>
       </Stack.Navigator>
     </NavigationContainer>
   );

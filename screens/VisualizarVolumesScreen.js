@@ -1,4 +1,4 @@
-// DetalheOrdemScreen.js
+// VisualizarVolumesScreen.js
 
 import React, { useEffect, useState } from 'react';
 import {
@@ -6,345 +6,238 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  ActivityIndicator,
-  Alert,
-  TextInput,
+  Image,
   TouchableOpacity,
-  KeyboardAvoidingView,
-  Platform,
+  Modal,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabaseClient';
+import { useNavigation } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
 
-const DetalheOrdemScreen = ({ route }) => {
-  const navigation = useNavigation();
+const VisualizarVolumesScreen = ({ route }) => {
   const { ordem } = route.params;
-  const [itens, setItens] = useState([]);
-  const [quantidades, setQuantidades] = useState({});
-  const [modoEdicao, setModoEdicao] = useState({});
-  const [loading, setLoading] = useState(true);
+  const [volumes, setVolumes] = useState([]);
+  const [pesos, setPesos] = useState({});
+  const [imagemAmpliada, setImagemAmpliada] = useState(null);
+  const [usuario, setUsuario] = useState(null);
 
-  const buscarItens = async () => {
-    setLoading(true);
-    const { data, error } = await supabase
-      .from('itens_ordem')
+  const navigation = useNavigation();
+
+  useEffect(() => {
+    buscarUsuario();
+    buscarVolumes();
+  }, []);
+
+  const buscarUsuario = async () => {
+    const { data, error } = await supabase.auth.getUser();
+    if (!error) {
+      setUsuario(data.user);
+    } else {
+      console.log('Erro ao buscar usuário:', error.message);
+    }
+  };
+
+  const buscarVolumes = async () => {
+    const { data: volumesData, error: volumesError } = await supabase
+      .from('itens_volume')
       .select('*')
       .eq('chave_contrato_carga_obra', ordem.chave_contrato_carga_obra);
 
-    if (error) {
-      Alert.alert('Erro ao buscar itens', error.message);
+    const { data: pesosData, error: pesosError } = await supabase
+      .from('peso_itens')
+      .select('codigo, peso_unitario');
+
+    if (!volumesError && !pesosError) {
+      const mapaPesos = {};
+
+      pesosData.forEach((item) => {
+        const valor = typeof item.peso_unitario === 'string'
+          ? parseFloat(item.peso_unitario.replace(',', '.'))
+          : parseFloat(item.peso_unitario);
+
+        mapaPesos[item.codigo] = isNaN(valor) ? 0 : valor;
+      });
+
+      setVolumes(volumesData);
+      setPesos(mapaPesos);
     } else {
-      setItens(data);
-    }
-    setLoading(false);
-  };
-
-  useEffect(() => {
-    buscarItens();
-  }, []);
-
-  const confirmarQuantidade = async (item) => {
-    let entrada = quantidades[item.id];
-    if (entrada === '' || entrada === null || entrada === undefined) {
-      entrada = '0';
-    }
-
-    const novaQtde = parseInt(entrada);
-    const antigaQtde = item.qtde_definida || 0;
-    const saldoAtual = item.carga;
-
-    if (isNaN(novaQtde) || novaQtde < 0) {
-      Alert.alert('Atenção', 'Informe uma quantidade válida (0 ou mais).');
-      return;
-    }
-
-    const novaCarga = saldoAtual + antigaQtde - novaQtde;
-
-    if (novaQtde > saldoAtual + antigaQtde) {
-      Alert.alert('Erro', 'Quantidade não pode ser maior que o saldo disponível.');
-      return;
-    }
-
-    const continuar = await new Promise((resolve) => {
-      Alert.alert(
-        'Confirmar Alteração',
-        `Deseja alterar a quantidade de ${antigaQtde} para ${novaQtde}?`,
-        [
-          { text: 'Cancelar', onPress: () => resolve(false), style: 'cancel' },
-          { text: 'Confirmar', onPress: () => resolve(true) },
-        ]
-      );
-    });
-
-    if (!continuar) return;
-
-    const { error } = await supabase
-      .from('itens_ordem')
-      .update({
-        qtde_definida: novaQtde,
-        carga: novaCarga,
-        saldo_separar: novaQtde,
-        selecionado: novaQtde > 0,
-      })
-      .eq('id', item.id);
-
-    if (error) {
-      Alert.alert('Erro ao salvar', error.message);
-    } else {
-      setItens((prevItens) =>
-        prevItens.map((i) =>
-          i.id === item.id
-            ? {
-                ...i,
-                qtde_definida: novaQtde,
-                carga: novaCarga,
-                saldo_separar: novaQtde,
-                selecionado: novaQtde > 0,
-              }
-            : i
-        )
-      );
-      setModoEdicao({ ...modoEdicao, [item.id]: false });
-      Alert.alert('Sucesso', `Quantidade de ${item.codigo} atualizada para ${novaQtde}.`);
+      console.error('Erro ao buscar dados:', volumesError?.message, pesosError?.message);
     }
   };
 
-  const renderItem = ({ item }) => {
-    const emEdicao = modoEdicao[item.id];
-
-    return (
-      <View key={item.id} style={styles.card}>
-        <Text style={styles.codigo}>Código: {item.codigo} {item.qtde_definida > 0 && !emEdicao ? '✅' : ''}</Text>
-        <Text>Descrição: {item.descricao}</Text>
-        <Text>Saldo a Carregar: {item.carga}</Text>
-        <Text>Quantidade Definida: {item.qtde_definida || 0}</Text>
-
-        {emEdicao ? (
-          <View style={styles.form}>
-            <TextInput
-              style={styles.input}
-              keyboardType="numeric"
-              placeholder="Nova quantidade"
-              value={quantidades[item.id] || ''}
-              onChangeText={(text) =>
-                setQuantidades({ ...quantidades, [item.id]: text })
-              }
-            />
-            <TouchableOpacity style={styles.botao} onPress={() => confirmarQuantidade(item)}>
-              <Text style={styles.textoBotao}>Salvar</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-            <TouchableOpacity
-              style={styles.botaoEditar}
-              onPress={() => {
-                setModoEdicao({ ...modoEdicao, [item.id]: true });
-                setQuantidades({
-                  ...quantidades,
-                  [item.id]: String(item.qtde_definida || ''),
-                });
-              }}
-            >
-              <Text style={styles.textoEditar}>Editar</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.botaoEditar, { backgroundColor: item.saldo_separar > 0 ? '#2980b9' : '#ccc' }]}
-              onPress={() => {
-                if (item.saldo_separar > 0) {
-                  navigation.navigate('SepararVolume', { item, ordem });
-                } else {
-                  Alert.alert('Atenção', 'Esse item já foi completamente separado.');
-                }
-              }}
-            >
-              <Text style={styles.textoEditar}>Separar Volume</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </View>
-    );
+  const abrirImagem = (url) => {
+    setImagemAmpliada(url);
   };
+
+  const fecharImagem = () => {
+    setImagemAmpliada(null);
+  };
+
+  const calcularPesoVolume = (volume) => {
+    const pesoUnitario = pesos[volume.codigo] || 0;
+    return volume.quantidade * pesoUnitario;
+  };
+
+  const pesoTotalCarga = volumes.reduce(
+    (total, vol) => total + calcularPesoVolume(vol),
+    0
+  );
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={80}
-    >
-      <View style={styles.container}>
-        <Text style={styles.titulo}>Itens da Ordem {ordem.contrato}</Text>
-        <Text numberOfLines={1} style={styles.cliente}>{ordem.cliente}</Text>
-
-        <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
-          <View style={{ flex: 1 }}>
-            {loading ? (
-              <ActivityIndicator size="large" color="#0000ff" />
-            ) : (
-              itens.map((item) => renderItem({ item }))
-            )}
-          </View>
-        </ScrollView>
-
-        {!loading && (
-          <View style={styles.rodape}>
-            <TouchableOpacity
-              style={styles.botaoCaminhao}
-              onPress={async () => {
-                const todosDefinidos = itens.every((item) => item.qtde_definida > 0);
-
-                const pergunta = todosDefinidos
-                  ? 'Deseja cancelar a carga completa e redefinir todas as quantidades?'
-                  : 'Tem certeza que deseja definir todas as quantidades como iguais ao saldo a carregar?';
-
-                const continuar = await new Promise((resolve) => {
-                  Alert.alert('Carregar tudo', pergunta, [
-                    { text: 'Cancelar', onPress: () => resolve(false), style: 'cancel' },
-                    { text: 'Confirmar', onPress: () => resolve(true) },
-                  ]);
-                });
-
-                if (!continuar) return;
-
-                const updates = itens.map((item) => {
-                  const cargaTotal = item.qtde_definida + item.carga;
-                  if (todosDefinidos) {
-                    return {
-                      id: item.id,
-                      qtde_definida: 0,
-                      carga: cargaTotal,
-                      saldo_separar: 0,
-                      selecionado: false,
-                    };
-                  } else {
-                    return {
-                      id: item.id,
-                      qtde_definida: cargaTotal,
-                      carga: 0,
-                      saldo_separar: cargaTotal,
-                      selecionado: cargaTotal > 0,
-                    };
-                  }
-                });
-
-                for (const update of updates) {
-                  await supabase
-                    .from('itens_ordem')
-                    .update({
-                      qtde_definida: update.qtde_definida,
-                      carga: update.carga,
-                      saldo_separar: update.saldo_separar,
-                      selecionado: update.selecionado,
-                    })
-                    .eq('id', update.id);
-                }
-
-                buscarItens();
-              }}
-            >
-              <Text style={styles.iconeCaminhao}>🚚</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.botaoSeparacao}
-              onPress={() => navigation.navigate('VisualizarVolumes', { ordem })}
-            >
-              <Text style={styles.textoBotao}>Ver Volumes</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+    <SafeAreaView style={styles.safeArea}>
+      {/* Cabeçalho */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <Ionicons name="arrow-back" size={24} color="#000" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Volumes Separados</Text>
+        <Text style={styles.userInfo}>
+          {usuario ? usuario.email : 'Carregando...'}
+        </Text>
       </View>
-    </KeyboardAvoidingView>
+
+      <ScrollView contentContainerStyle={styles.container}>
+        {volumes.length === 0 ? (
+          <Text style={styles.info}>Nenhum volume separado ainda.</Text>
+        ) : (
+          volumes.map((vol, index) => (
+            <View key={index} style={styles.card}>
+              <Text style={styles.label}>Volume Nº {vol.nVolume}</Text>
+              <Text>Código: {vol.codigo}</Text>
+              <Text>Descrição: {vol.descricao}</Text>
+              <Text>Quantidade: {vol.quantidade}</Text>
+              <Text>
+                Peso do volume:{' '}
+                {calcularPesoVolume(vol).toLocaleString('pt-BR', {
+                  minimumFractionDigits: 2,
+                })}{' '}
+                kg
+              </Text>
+
+              <View style={styles.fotosContainer}>
+                {[vol.foto1, vol.foto2, vol.foto3, vol.foto4].map((foto, i) =>
+                  foto ? (
+                    <TouchableOpacity key={i} onPress={() => abrirImagem(foto)}>
+                      <Image source={{ uri: foto }} style={styles.fotoMiniatura} />
+                    </TouchableOpacity>
+                  ) : null
+                )}
+              </View>
+            </View>
+          ))
+        )}
+
+        {volumes.length > 0 && (
+          <Text style={styles.pesoTotal}>
+            Peso total da carga:{' '}
+            {pesoTotalCarga.toLocaleString('pt-BR', {
+              minimumFractionDigits: 2,
+            })}{' '}
+            kg
+          </Text>
+        )}
+      </ScrollView>
+
+      {/* Modal de imagem ampliada */}
+      <Modal visible={!!imagemAmpliada} transparent animationType="fade">
+        <View style={styles.modalContainer}>
+          <TouchableOpacity style={styles.modalFechar} onPress={fecharImagem}>
+            <Text style={styles.modalFecharTexto}>Fechar</Text>
+          </TouchableOpacity>
+          {imagemAmpliada && (
+            <Image source={{ uri: imagemAmpliada }} style={styles.imagemAmpliada} />
+          )}
+        </View>
+      </Modal>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
     flex: 1,
+    backgroundColor: '#fff',
+  },
+  header: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#f9f9f9',
+    borderBottomWidth: 1,
+    borderBottomColor: '#ddd',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: 4,
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  userInfo: {
+    fontSize: 12,
+    color: '#555',
+  },
+  container: {
     padding: 16,
     backgroundColor: '#fff',
   },
-  titulo: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  cliente: {
-    fontSize: 14,
-    color: '#333',
+  card: {
+    backgroundColor: '#f2f2f2',
+    borderRadius: 8,
+    padding: 12,
     marginBottom: 12,
   },
-  card: {
-    backgroundColor: '#f5f5f5',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 10,
-  },
-  codigo: {
+  label: {
     fontWeight: 'bold',
     marginBottom: 4,
   },
-  form: {
+  fotosContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
+    flexWrap: 'wrap',
     marginTop: 8,
     gap: 8,
   },
-  input: {
+  fotoMiniatura: {
+    width: 60,
+    height: 60,
+    borderRadius: 4,
+  },
+  modalContainer: {
     flex: 1,
-    borderWidth: 1,
-    borderColor: '#ccc',
-    padding: 6,
-    borderRadius: 6,
-    backgroundColor: '#fff',
-  },
-  botao: {
-    backgroundColor: '#2ecc71',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-  },
-  textoBotao: {
-    color: '#fff',
-    fontWeight: 'bold',
-  },
-  botaoEditar: {
-    backgroundColor: '#f39c12',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-    alignSelf: 'flex-start',
-  },
-  textoEditar: {
-    color: '#fff',
-    fontWeight: 'bold',
-  },
-  rodape: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    backgroundColor: 'rgba(0,0,0,0.9)',
+    justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 12,
-    paddingVertical: 10,
-    borderTopWidth: 1,
-    borderColor: '#ccc',
   },
-  botaoCaminhao: {
-    backgroundColor: '#3498db',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 10,
+  modalFechar: {
+    position: 'absolute',
+    top: 40,
+    right: 20,
+    backgroundColor: '#fff',
+    padding: 8,
+    borderRadius: 8,
   },
-  iconeCaminhao: {
-    fontSize: 24,
-    color: '#fff',
+  modalFecharTexto: {
+    color: '#000',
+    fontWeight: 'bold',
   },
-  botaoSeparacao: {
-    backgroundColor: '#8e44ad',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 10,
+  imagemAmpliada: {
+    width: '90%',
+    height: '70%',
+    resizeMode: 'contain',
+  },
+  info: {
+    fontStyle: 'italic',
+    textAlign: 'center',
+    marginTop: 20,
+    color: '#888',
+  },
+  pesoTotal: {
+    fontWeight: 'bold',
+    fontSize: 16,
+    textAlign: 'center',
+    marginTop: 24,
+    color: '#000',
   },
 });
 
-export default DetalheOrdemScreen;
+export default VisualizarVolumesScreen;

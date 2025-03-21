@@ -12,19 +12,29 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabaseClient';
 
 const EmbarqueScreen = ({ route }) => {
   const navigation = useNavigation();
   const { ordem } = route.params;
+
+  const [usuario, setUsuario] = useState(null);
   const [volumes, setVolumes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [todosConferidosEEmbarcados, setTodosConferidosEEmbarcados] = useState(false);
   const [itensOrdem, setItensOrdem] = useState([]);
 
   useEffect(() => {
+    buscarUsuario();
     buscarDados();
   }, []);
+
+  const buscarUsuario = async () => {
+    const { data, error } = await supabase.auth.getUser();
+    if (!error) setUsuario(data.user);
+  };
 
   const buscarDados = async () => {
     setLoading(true);
@@ -125,65 +135,96 @@ const EmbarqueScreen = ({ route }) => {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.titulo}>Embarque e Conferência</Text>
-      <Text style={styles.info}>Ordem: {ordem.contrato}</Text>
-
-      {loading ? (
-        <ActivityIndicator size="large" color="#2980b9" />
-      ) : (
-        volumes.map((volume) => (
-          <View key={volume.id} style={styles.card}>
-            <Text style={styles.itemTitulo}>{volume.codigo} - {volume.descricao}</Text>
-            <Text>Volume: {volume.nVolume}</Text>
-            <Text>Quantidade: {volume.quantidade}</Text>
-
-            <View style={styles.fotosContainer}>
-              {[volume.foto1, volume.foto2, volume.foto3, volume.foto4].filter(Boolean).map((foto, idx) => (
-                <Image key={idx} source={{ uri: foto }} style={styles.fotoMiniatura} />
-              ))}
-            </View>
-
-            <View style={styles.botoesLinha}>
-              <TouchableOpacity
-                style={[styles.botao, volume.confirma_embarque ? styles.botaoConfirmado : styles.botaoConfirmar]}
-                onPress={() => handleConfirmar(volume)}
-              >
-                <Text style={styles.textoBotao}>Conferir</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.botao, volume.embarcado ? styles.botaoEmbarcado : styles.botaoEmbarcar]}
-                onPress={() => handleEmbarcar(volume)}
-              >
-                <Text style={styles.textoBotao}>Embarcar</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        ))
-      )}
-
-      {todosConferidosEEmbarcados && (
-        <TouchableOpacity
-          style={styles.botaoFinalizar}
-          onPress={() => navigation.navigate('FinalizarEmbarque', { ordem })}
-        >
-          <Text style={styles.textoBotao}>Finalizar Embarque</Text>
+    <SafeAreaView style={styles.safeArea}>
+      {/* Cabeçalho padrão */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <Ionicons name="arrow-back" size={24} color="#000" />
         </TouchableOpacity>
-      )}
-    </ScrollView>
+        <Text style={styles.headerTitle}>Embarque e Conferência</Text>
+        <Text style={styles.userInfo}>
+          {usuario ? usuario.email : 'Carregando...'}
+        </Text>
+      </View>
+
+      <ScrollView contentContainerStyle={styles.container}>
+        <Text style={styles.info}>Ordem: {ordem.contrato}</Text>
+
+        {loading ? (
+          <ActivityIndicator size="large" color="#2980b9" />
+        ) : (
+          volumes.map((volume) => (
+            <View key={volume.id} style={styles.card}>
+              <Text style={styles.itemTitulo}>{volume.codigo} - {volume.descricao}</Text>
+              <Text>Volume: {volume.nVolume}</Text>
+              <Text>Quantidade: {volume.quantidade}</Text>
+
+              <View style={styles.fotosContainer}>
+                {[volume.foto1, volume.foto2, volume.foto3, volume.foto4]
+                  .filter(Boolean)
+                  .map((foto, idx) => (
+                    <Image key={idx} source={{ uri: foto }} style={styles.fotoMiniatura} />
+                  ))}
+              </View>
+
+              <View style={styles.botoesLinha}>
+                <TouchableOpacity
+                  style={[styles.botao, volume.confirma_embarque ? styles.botaoConfirmado : styles.botaoConfirmar]}
+                  onPress={() => handleConfirmar(volume)}
+                >
+                  <Text style={styles.textoBotao}>Conferir</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.botao, volume.embarcado ? styles.botaoEmbarcado : styles.botaoEmbarcar]}
+                  onPress={() => handleEmbarcar(volume)}
+                >
+                  <Text style={styles.textoBotao}>Embarcar</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))
+        )}
+
+        {todosConferidosEEmbarcados && (
+          <TouchableOpacity
+            style={styles.botaoFinalizar}
+            onPress={() => navigation.navigate('FinalizarEmbarque', { ordem })}
+          >
+            <Text style={styles.textoBotao}>Finalizar Embarque</Text>
+          </TouchableOpacity>
+        )}
+      </ScrollView>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  header: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#f9f9f9',
+    borderBottomWidth: 1,
+    borderBottomColor: '#ddd',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: 4,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  userInfo: {
+    fontSize: 12,
+    color: '#555',
+  },
   container: {
     padding: 16,
     backgroundColor: '#fff',
-  },
-  titulo: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 6,
   },
   info: {
     fontSize: 14,
