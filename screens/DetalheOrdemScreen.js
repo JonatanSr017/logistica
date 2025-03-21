@@ -128,19 +128,72 @@ const DetalheOrdemScreen = ({ route }) => {
       return;
     }
 
-    if (antigaQtde > 0 && novaQtde !== antigaQtde) {
-      const continuar = await new Promise((resolve) => {
+    const { data: volumes, error: volumeError } = await supabase
+      .from('itens_volume')
+      .select('*')
+      .eq('id_itens', item.id);
+
+    if (volumeError) {
+      Alert.alert('Erro ao verificar volumes', volumeError.message);
+      return;
+    }
+
+    if (volumes.length > 0 && novaQtde !== antigaQtde) {
+      const confirmarExclusao = await new Promise((resolve) => {
         Alert.alert(
-          'Confirmar Alteração',
-          `Deseja alterar a quantidade de ${antigaQtde} para ${novaQtde}?`,
+          'Atenção',
+          'Alterar a quantidade definida irá excluir todos os volumes separados e fotos relacionadas a esta peça. Deseja continuar?',
           [
-            { text: 'Cancelar', onPress: () => resolve(false), style: 'cancel' },
-            { text: 'Confirmar', onPress: () => resolve(true) },
+            { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Sim, continuar', onPress: () => resolve(true) },
           ]
         );
       });
 
-      if (!continuar) return;
+      if (!confirmarExclusao) return;
+
+      const fotosParaExcluir = [];
+      volumes.forEach((v) => {
+        [v.foto1, v.foto2, v.foto3, v.foto4].forEach((foto) => {
+          if (foto) {
+            const partes = foto.split('/bucket1/');
+            if (partes.length > 1) {
+              fotosParaExcluir.push(`fotos/${partes[1]}`);
+            }
+          }
+        });
+      });
+
+      if (fotosParaExcluir.length > 0) {
+        const { error: deleteFotosError } = await supabase.storage
+          .from('bucket1')
+          .remove(fotosParaExcluir);
+
+        if (deleteFotosError) {
+          Alert.alert('Erro ao excluir fotos', deleteFotosError.message);
+          return;
+        }
+      }
+
+      const { error: deleteVolumesError } = await supabase
+        .from('itens_volume')
+        .delete()
+        .eq('id_itens', item.id);
+
+      if (deleteVolumesError) {
+        Alert.alert('Erro ao excluir volumes', deleteVolumesError.message);
+        return;
+      }
+
+      const { error: updateError } = await supabase
+        .from('itens_ordem')
+        .update({ qtde_separada: 0 })
+        .eq('id', item.id);
+
+      if (updateError) {
+        Alert.alert('Erro ao atualizar qtde_separada', updateError.message);
+        return;
+      }
     }
 
     const error = await atualizarQuantidadeItem(item.id, novaQtde);
@@ -156,6 +209,8 @@ const DetalheOrdemScreen = ({ route }) => {
                 qtde_definida: novaQtde,
                 saldo_separar: novaQtde,
                 selecionado: novaQtde > 0,
+                qtde_separada:
+                  (volumes.length > 0 && novaQtde !== antigaQtde) ? 0 : i.qtde_separada,
               }
             : i
         )
@@ -261,7 +316,6 @@ const DetalheOrdemScreen = ({ route }) => {
       keyboardVerticalOffset={80}
     >
       <SafeAreaView style={styles.container}>
-        {/* Cabeçalho padrão */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()}>
             <Ionicons name="arrow-back" size={24} color="#000" />
